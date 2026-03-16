@@ -306,12 +306,16 @@ function drainIpcInput(): string[] {
     for (const file of files) {
       const filePath = path.join(IPC_INPUT_DIR, file);
       try {
-        const data = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-        fs.unlinkSync(filePath);
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        // Delete BEFORE parsing — even if parse fails, don't reprocess
+        try { fs.unlinkSync(filePath); } catch { /* already gone, ok */ }
+        const data = JSON.parse(raw);
         if (data.type === 'message' && data.text) {
           messages.push(data.text);
         }
       } catch (err) {
+        // File vanished between readdir and readFile (OneDrive/race) — skip
+        if (err instanceof Error && err.message.includes('ENOENT')) continue;
         log(`Failed to process input file ${file}: ${err instanceof Error ? err.message : String(err)}`);
         try { fs.unlinkSync(filePath); } catch { /* ignore */ }
       }
