@@ -470,10 +470,10 @@ async function runQuery(
         },
         gdrive: {
           command: 'npx',
-          args: ['-y', '@anthropic-ai/google-drive-mcp'],
+          args: ['-y', '@modelcontextprotocol/server-gdrive'],
           env: {
-            GCLOUD_OAUTH_KEYS_FILE: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-            GCLOUD_OAUTH_CREDENTIALS_FILE: '/home/node/.gmail-mcp/credentials.json',
+            GDRIVE_OAUTH_PATH: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+            GDRIVE_CREDENTIALS_PATH: '/home/node/.gmail-mcp/credentials.json',
           },
         },
       },
