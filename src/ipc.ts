@@ -25,18 +25,32 @@ function resolveContainerPath(
   const normalized = containerPath.replace(/\\/g, '/');
 
   // /workspace/group/... → host group folder
-  if (normalized.startsWith('/workspace/group/') || normalized === '/workspace/group') {
-    const relative = normalized.slice('/workspace/group'.length).replace(/^\//, '');
+  if (
+    normalized.startsWith('/workspace/group/') ||
+    normalized === '/workspace/group'
+  ) {
+    const relative = normalized
+      .slice('/workspace/group'.length)
+      .replace(/^\//, '');
     return path.join(resolveGroupFolderPath(group.folder), relative);
   }
 
   // /workspace/extra/{name}/... → additionalMounts
-  if (normalized.startsWith('/workspace/extra/') && group.containerConfig?.additionalMounts) {
+  if (
+    normalized.startsWith('/workspace/extra/') &&
+    group.containerConfig?.additionalMounts
+  ) {
     const afterExtra = normalized.slice('/workspace/extra/'.length);
     for (const mount of group.containerConfig.additionalMounts) {
-      const containerName = mount.containerPath || path.basename(mount.hostPath);
-      if (afterExtra === containerName || afterExtra.startsWith(containerName + '/')) {
-        const relative = afterExtra.slice(containerName.length).replace(/^\//, '');
+      const containerName =
+        mount.containerPath || path.basename(mount.hostPath);
+      if (
+        afterExtra === containerName ||
+        afterExtra.startsWith(containerName + '/')
+      ) {
+        const relative = afterExtra
+          .slice(containerName.length)
+          .replace(/^\//, '');
         const hostPath = mount.hostPath.startsWith('~/')
           ? path.join(os.homedir(), mount.hostPath.slice(2))
           : mount.hostPath;

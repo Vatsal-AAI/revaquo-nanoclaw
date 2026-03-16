@@ -22,5 +22,5 @@
 
 ## Agent permissions
 
-Full access to: REVAQUO, SHUBHAM-GPT, TATWAM-GPT, INFRA, ASH, QUANT, OUTREACH, MAYA, RACHITA-GPT
+Full access to: REVA, SHUBHAM-GPT, TATWAM-GPT, INFRA, ASH, QUANT, OUTREACH, MAYA, RACHITA-GPT
 Can APPROVE external actions on behalf of Vatsal

@@ -347,9 +347,10 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
-        assistantName: (group.trigger && !group.trigger.startsWith('@'))
-          ? group.trigger.toUpperCase()
-          : ASSISTANT_NAME,
+        assistantName:
+          group.trigger && !group.trigger.startsWith('@')
+            ? group.trigger.toUpperCase()
+            : ASSISTANT_NAME,
         ...(imageAttachments.length > 0 && { imageAttachments }),
       },
       (proc, containerName) =>
@@ -655,7 +656,10 @@ async function main(): Promise<void> {
     sendFile: (jid, filePath, caption) => {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
-      if (!channel.sendFile) throw new Error(`Channel ${channel.name} does not support file sending`);
+      if (!channel.sendFile)
+        throw new Error(
+          `Channel ${channel.name} does not support file sending`,
+        );
       return channel.sendFile(jid, filePath, caption);
     },
     registeredGroups: () => registeredGroups,

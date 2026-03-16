@@ -4,7 +4,7 @@
 
 | Time | Agent | Task |
 |---|---|---|
-| 8:00 AM | REVAQUO | Morning brief: MAYA content pick + ASH priority + INFRA overnight alerts |
+| 8:00 AM | REVA | Morning brief: MAYA content pick + ASH priority + INFRA overnight alerts |
 
 ## Weekly
 

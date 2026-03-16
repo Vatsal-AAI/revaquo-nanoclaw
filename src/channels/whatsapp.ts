@@ -332,18 +332,25 @@ export class WhatsAppChannel implements Channel {
     }
   }
 
-  async sendFile(jid: string, filePath: string, caption?: string): Promise<void> {
+  async sendFile(
+    jid: string,
+    filePath: string,
+    caption?: string,
+  ): Promise<void> {
     const fileName = path.basename(filePath);
     const ext = path.extname(filePath).toLowerCase();
 
     // Determine MIME type from extension
     const mimeTypes: Record<string, string> = {
       '.pdf': 'application/pdf',
-      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.docx':
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       '.doc': 'application/msword',
-      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.xlsx':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       '.xls': 'application/vnd.ms-excel',
-      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.pptx':
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
       '.ppt': 'application/vnd.ms-powerpoint',
       '.csv': 'text/csv',
       '.txt': 'text/plain',
@@ -381,7 +388,10 @@ export class WhatsAppChannel implements Channel {
     } catch (err) {
       logger.error({ jid, filePath, err }, 'Failed to send file');
       // Fall back to text message with error
-      await this.sendMessage(jid, `Could not send file "${fileName}": ${err instanceof Error ? err.message : String(err)}`);
+      await this.sendMessage(
+        jid,
+        `Could not send file "${fileName}": ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

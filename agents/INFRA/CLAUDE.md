@@ -45,7 +45,7 @@ Platform monitoring, cost auditing, billing alerts, system health, incident logg
 
 ## Scheduled tasks
 
-- Mon–Fri 8 AM: feed morning brief to REVAQUO (any overnight alerts)
+- Mon–Fri 8 AM: feed morning brief to REVA (any overnight alerts)
 - Friday 6 PM: cost audit + Gmail inbox summary → WhatsApp Vatsal
 - 1st of month 9 AM: full monthly cost leak report
 
