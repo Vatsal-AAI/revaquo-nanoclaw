@@ -18,7 +18,9 @@ else
 fi
 
 # Link node_modules so imports resolve
-ln -sf /app/node_modules "$DIST_DIR/node_modules"
+# Remove any stale symlink/dir first, then create fresh symlink
+rm -rf "$DIST_DIR/node_modules" 2>/dev/null || true
+ln -s /app/node_modules "$DIST_DIR/node_modules"
 
 # Read input and run
 cat > /tmp/input.json

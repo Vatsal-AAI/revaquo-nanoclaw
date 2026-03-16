@@ -22,7 +22,7 @@ NanoClaw installation for Revaquo Venture Pvt. Ltd.
 
 ## Agent roster
 
-REVAQUO, ASH, QUANT, MAYA, RACHITA-GPT, SHUBHAM-GPT, TATWAM-GPT, OUTREACH, INFRA
+REVA, ASH, QUANT, MAYA, RACHITA-GPT, SHUBHAM-GPT, TATWAM-GPT, OUTREACH, INFRA
 
 ## Context load order
 
