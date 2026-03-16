@@ -27,8 +27,13 @@ import {
   stopContainer,
 } from './container-runtime.js';
 import { detectAuthMode } from './credential-proxy.js';
+import { readEnvFile } from './env.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+
+// Read GITHUB_TOKEN from .env (never loaded into process.env for safety)
+const ghSecrets = readEnvFile(['GITHUB_TOKEN']);
+const GITHUB_TOKEN = process.env.GITHUB_TOKEN || ghSecrets.GITHUB_TOKEN;
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -249,6 +254,27 @@ function buildContainerArgs(
     args.push('-e', 'ANTHROPIC_API_KEY=placeholder');
   } else {
     args.push('-e', 'CLAUDE_CODE_OAUTH_TOKEN=placeholder');
+  }
+
+  // Pass GitHub token so container agents can push code
+  if (GITHUB_TOKEN) {
+    args.push('-e', `GITHUB_TOKEN=${GITHUB_TOKEN}`);
+    args.push(
+      '-e',
+      `GIT_CONFIG_COUNT=3`,
+      '-e',
+      `GIT_CONFIG_KEY_0=credential.https://github.com.helper`,
+      '-e',
+      `GIT_CONFIG_VALUE_0=!f() { echo "protocol=https"; echo "host=github.com"; echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f`,
+      '-e',
+      `GIT_CONFIG_KEY_1=user.email`,
+      '-e',
+      `GIT_CONFIG_VALUE_1=vatsal@aashishintelligence.com`,
+      '-e',
+      `GIT_CONFIG_KEY_2=user.name`,
+      '-e',
+      `GIT_CONFIG_VALUE_2=Vatsal-AAI`,
+    );
   }
 
   // Runtime-specific args for host gateway resolution

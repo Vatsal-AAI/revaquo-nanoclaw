@@ -9,6 +9,22 @@ import {
   TIMEZONE,
   TRIGGER_PATTERN,
 } from './config.js';
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Build a trigger regex for a group. Uses the per-group trigger if set,
+ *  otherwise falls back to the global TRIGGER_PATTERN. Per-group triggers
+ *  match the name as a word boundary anywhere in the message (case-insensitive),
+ *  without requiring @ prefix or start-of-message. */
+function groupTriggerPattern(group: { trigger?: string }): RegExp {
+  if (group.trigger && !group.trigger.startsWith('@')) {
+    // Per-group plain name trigger: match anywhere as whole word
+    return new RegExp(`\\b${escapeRegex(group.trigger)}\\b`, 'i');
+  }
+  return TRIGGER_PATTERN;
+}
 import { startCredentialProxy } from './credential-proxy.js';
 import './channels/index.js';
 import {
@@ -172,9 +188,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   // For non-main groups, check if trigger is required and present
   if (!isMainGroup && group.requiresTrigger !== false) {
     const allowlistCfg = loadSenderAllowlist();
+    const triggerRe = groupTriggerPattern(group);
     const hasTrigger = missedMessages.some(
       (m) =>
-        TRIGGER_PATTERN.test(m.content.trim()) &&
+        triggerRe.test(m.content.trim()) &&
         (m.is_from_me || isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
     );
     if (!hasTrigger) return true;
@@ -330,7 +347,9 @@ async function runAgent(
         groupFolder: group.folder,
         chatJid,
         isMain,
-        assistantName: ASSISTANT_NAME,
+        assistantName: (group.trigger && !group.trigger.startsWith('@'))
+          ? group.trigger.toUpperCase()
+          : ASSISTANT_NAME,
         ...(imageAttachments.length > 0 && { imageAttachments }),
       },
       (proc, containerName) =>
@@ -412,9 +431,10 @@ async function startMessageLoop(): Promise<void> {
           // context when a trigger eventually arrives.
           if (needsTrigger) {
             const allowlistCfg = loadSenderAllowlist();
+            const triggerRe = groupTriggerPattern(group);
             const hasTrigger = groupMessages.some(
               (m) =>
-                TRIGGER_PATTERN.test(m.content.trim()) &&
+                triggerRe.test(m.content.trim()) &&
                 (m.is_from_me ||
                   isTriggerAllowed(chatJid, m.sender, allowlistCfg)),
             );
@@ -631,6 +651,12 @@ async function main(): Promise<void> {
       const channel = findChannel(channels, jid);
       if (!channel) throw new Error(`No channel for JID: ${jid}`);
       return channel.sendMessage(jid, text);
+    },
+    sendFile: (jid, filePath, caption) => {
+      const channel = findChannel(channels, jid);
+      if (!channel) throw new Error(`No channel for JID: ${jid}`);
+      if (!channel.sendFile) throw new Error(`Channel ${channel.name} does not support file sending`);
+      return channel.sendFile(jid, filePath, caption);
     },
     registeredGroups: () => registeredGroups,
     registerGroup,

@@ -266,7 +266,8 @@ export class WhatsAppChannel implements Channel {
             // (even in DMs/self-chat) so we check for that.
             const isBotMessage = ASSISTANT_HAS_OWN_NUMBER
               ? fromMe
-              : content.startsWith(`${ASSISTANT_NAME}:`);
+              : content.startsWith(`${ASSISTANT_NAME}:`) ||
+                content.startsWith(`${this.getDisplayName(chatJid)}:`);
 
             this.opts.onMessage(chatJid, {
               id: msg.key.id || '',
@@ -289,14 +290,26 @@ export class WhatsAppChannel implements Channel {
     });
   }
 
+  /** Get the display name for a JID — uses per-group trigger if set, else global ASSISTANT_NAME */
+  private getDisplayName(jid: string): string {
+    const groups = this.opts.registeredGroups();
+    const group = groups[jid];
+    if (group?.trigger && !group.trigger.startsWith('@')) {
+      // Capitalise first letter for display (e.g. "Maya" → "MAYA")
+      return group.trigger.toUpperCase();
+    }
+    return ASSISTANT_NAME;
+  }
+
   async sendMessage(jid: string, text: string): Promise<void> {
     // Prefix bot messages with assistant name so users know who's speaking.
     // On a shared number, prefix is also needed in DMs (including self-chat)
     // to distinguish bot output from user messages.
     // Skip only when the assistant has its own dedicated phone number.
+    const displayName = this.getDisplayName(jid);
     const prefixed = ASSISTANT_HAS_OWN_NUMBER
       ? text
-      : `${ASSISTANT_NAME}: ${text}`;
+      : `${displayName}: ${text}`;
 
     if (!this.connected) {
       this.outgoingQueue.push({ jid, text: prefixed });
@@ -316,6 +329,59 @@ export class WhatsAppChannel implements Channel {
         { jid, err, queueSize: this.outgoingQueue.length },
         'Failed to send, message queued',
       );
+    }
+  }
+
+  async sendFile(jid: string, filePath: string, caption?: string): Promise<void> {
+    const fileName = path.basename(filePath);
+    const ext = path.extname(filePath).toLowerCase();
+
+    // Determine MIME type from extension
+    const mimeTypes: Record<string, string> = {
+      '.pdf': 'application/pdf',
+      '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      '.doc': 'application/msword',
+      '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      '.xls': 'application/vnd.ms-excel',
+      '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      '.ppt': 'application/vnd.ms-powerpoint',
+      '.csv': 'text/csv',
+      '.txt': 'text/plain',
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.gif': 'image/gif',
+      '.mp4': 'video/mp4',
+      '.mp3': 'audio/mpeg',
+    };
+    const mimetype = mimeTypes[ext] || 'application/octet-stream';
+    const displayName = this.getDisplayName(jid);
+    const fullCaption = caption
+      ? `${displayName}: ${caption}`
+      : `${displayName}: 📎 ${fileName}`;
+
+    try {
+      const fileBuffer = fs.readFileSync(filePath);
+
+      // Images go as image messages, everything else as documents
+      if (['.png', '.jpg', '.jpeg', '.gif'].includes(ext)) {
+        await this.sock.sendMessage(jid, {
+          image: fileBuffer,
+          caption: fullCaption,
+        });
+      } else {
+        await this.sock.sendMessage(jid, {
+          document: fileBuffer,
+          mimetype,
+          fileName,
+          caption: fullCaption,
+        });
+      }
+      logger.info({ jid, fileName, size: fileBuffer.length }, 'File sent');
+    } catch (err) {
+      logger.error({ jid, filePath, err }, 'Failed to send file');
+      // Fall back to text message with error
+      await this.sendMessage(jid, `Could not send file "${fileName}": ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 

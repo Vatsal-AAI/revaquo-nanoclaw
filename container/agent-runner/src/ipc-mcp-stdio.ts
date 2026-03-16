@@ -63,6 +63,36 @@ server.tool(
 );
 
 server.tool(
+  'send_file',
+  "Send a file (document, spreadsheet, presentation, PDF, image) to the user or group via WhatsApp. The file must exist in the container filesystem. Use this after creating a document to share it directly in the chat.",
+  {
+    file_path: z.string().describe('Absolute path to the file inside the container (e.g., /workspace/extra/myra/05. Operations/SOP.docx)'),
+    caption: z.string().optional().describe('Optional caption/description to send with the file'),
+  },
+  async (args) => {
+    if (!fs.existsSync(args.file_path)) {
+      return {
+        content: [{ type: 'text' as const, text: `File not found: ${args.file_path}` }],
+        isError: true,
+      };
+    }
+
+    const data = {
+      type: 'file',
+      chatJid,
+      filePath: args.file_path,
+      caption: args.caption || undefined,
+      groupFolder,
+      timestamp: new Date().toISOString(),
+    };
+
+    writeIpcFile(MESSAGES_DIR, data);
+
+    return { content: [{ type: 'text' as const, text: `File sent: ${path.basename(args.file_path)}` }] };
+  },
+);
+
+server.tool(
   'schedule_task',
   `Schedule a recurring or one-time task. The task will run as a full agent with access to all tools. Returns the task ID for future reference. To modify an existing task, use update_task instead.
 
