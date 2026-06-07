@@ -69,7 +69,7 @@ COPY entrypoint.sh /app/entrypoint.sh
 RUN chmod +x /app/entrypoint.sh
 
 # Set ownership to node user (non-root) for writable directories
-RUN chown -R node:node /workspace && chmod 777 /home/node
+RUN chown -R node:node /workspace && chmod -R 777 /home/node
 
 # Switch to non-root user (required for --dangerously-skip-permissions)
 USER node
