@@ -198,6 +198,39 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       fs.writeFileSync(filePath, markdown);
 
       log(`Archived conversation to ${filePath}`);
+
+      // Hermes pattern: flush session learnings to memory before compaction
+      // Write a summary snapshot so the next session starts with context
+      const memoryDir = '/workspace/group/memory';
+      fs.mkdirSync(memoryDir, { recursive: true });
+      const summaryPath = path.join(memoryDir, 'summary.md');
+      const timestamp = new Date().toISOString();
+      const sessionTag = sessionId?.slice(0, 8) || 'unknown';
+
+      // Extract key facts from the conversation for the summary
+      const keyMessages = messages
+        .filter(m => m.role === 'assistant' && m.content.length > 50)
+        .slice(-3) // Last 3 substantive assistant messages
+        .map(m => m.content.slice(0, 200))
+        .join('\n');
+
+      const logEntry = `\n## Session ${sessionTag} — ${timestamp}\n${summary || 'No summary available'}\n\nKey context:\n${keyMessages}\n`;
+
+      // Keep summary file under 5000 chars — trim oldest entries
+      let existing = '';
+      if (fs.existsSync(summaryPath)) {
+        existing = fs.readFileSync(summaryPath, 'utf-8');
+      }
+      const combined = existing + logEntry;
+      if (combined.length > 5000) {
+        // Keep only the newest half
+        const lines = combined.split('\n## ');
+        const keep = lines.slice(Math.floor(lines.length / 2));
+        fs.writeFileSync(summaryPath, '## ' + keep.join('\n## '));
+      } else {
+        fs.writeFileSync(summaryPath, combined);
+      }
+      log(`Memory summary updated at ${summaryPath}`);
     } catch (err) {
       log(`Failed to archive transcript: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -363,6 +396,33 @@ async function runQuery(
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
 ): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+  // Compute sibling MCP paths from the nanoclaw MCP path
+  const mcpDir = path.dirname(mcpServerPath);
+  const falMcpPath = path.join(mcpDir, 'fal-mcp-stdio.js');
+  const sarvamMcpPath = path.join(mcpDir, 'sarvam-mcp-stdio.js');
+  const yourmemoryMcpPath = path.join(mcpDir, 'yourmemory-mcp.js');
+  const gwsMcpPath = path.join(mcpDir, 'gws-mcp-stdio.js');
+
+  // Per-group Google Workspace impersonation (e.g. PULSE → support@myrawellness.in).
+  // If /workspace/group/gws.json sets impersonateUser, this agent talks to Google
+  // AS that mailbox via the service-account GWS MCP, and the shared-identity
+  // gmail/gdrive MCPs are turned off for this group to avoid identity confusion.
+  // Groups without gws.json are unaffected and keep the shared gmail/gdrive MCPs.
+  let gwsConfig: {
+    impersonateUser?: string;
+    credentialsFile?: string;
+    scopes?: string;
+  } | null = null;
+  try {
+    const gwsCfgPath = '/workspace/group/gws.json';
+    if (fs.existsSync(gwsCfgPath)) {
+      gwsConfig = JSON.parse(fs.readFileSync(gwsCfgPath, 'utf-8'));
+    }
+  } catch (err) {
+    log(`Failed to read gws.json: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  const gwsEnabled = !!gwsConfig?.impersonateUser;
+
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -416,6 +476,24 @@ async function runQuery(
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
+  // Hermes pattern: auto-inject memory snapshot into system prompt
+  // Agents get baseline context without needing to call recall_memory
+  const memoryFiles = [
+    '/workspace/group/memory/STATE.md',
+    '/workspace/group/memory/MEMORY.md',
+    '/workspace/group/memory/summary.md',
+  ];
+  let memorySnapshot: string | undefined;
+  for (const memPath of memoryFiles) {
+    if (fs.existsSync(memPath)) {
+      const content = fs.readFileSync(memPath, 'utf-8').trim();
+      if (content.length > 0 && content.length < 10000) { // Cap at 10k chars
+        memorySnapshot = `\n\n---\n## YOUR MEMORY (auto-injected from ${path.basename(memPath)})\n${content}\n---\n`;
+        break;
+      }
+    }
+  }
+
   // Discover additional directories mounted at /workspace/extra/*
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
@@ -439,8 +517,12 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
-      systemPrompt: globalClaudeMd
-        ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
+      systemPrompt: (globalClaudeMd || memorySnapshot)
+        ? {
+            type: 'preset' as const,
+            preset: 'claude_code' as const,
+            append: [globalClaudeMd, memorySnapshot].filter(Boolean).join('\n\n'),
+          }
         : undefined,
       allowedTools: [
         'Bash',
@@ -453,6 +535,10 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__gmail__*',
         'mcp__gdrive__*',
+        'mcp__gws__*',
+        'mcp__yourmemory__*',
+        'mcp__fal__*',
+        'mcp__sarvam__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -468,18 +554,61 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
-        gmail: {
-          command: 'npx',
-          args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
-        },
-        gdrive: {
-          command: 'npx',
-          args: ['-y', '@modelcontextprotocol/server-gdrive'],
+        yourmemory: {
+          command: 'node',
+          args: [yourmemoryMcpPath],
           env: {
-            GDRIVE_OAUTH_PATH: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
-            GDRIVE_CREDENTIALS_PATH: '/home/node/.gmail-mcp/credentials.json',
+            YOURMEMORY_URL: `http://${process.env.CONTAINER_HOST_GATEWAY || 'host.docker.internal'}:8000`,
+            YOURMEMORY_USER_ID: containerInput.groupFolder,
           },
         },
+        ...(process.env.FAL_KEY ? {
+          fal: {
+            command: 'node',
+            args: [falMcpPath],
+            env: {
+              FAL_KEY: process.env.FAL_KEY,
+            },
+          },
+        } : {}),
+        ...(process.env.SARVAM_API_KEY ? {
+          sarvam: {
+            command: 'node',
+            args: [sarvamMcpPath],
+            env: {
+              SARVAM_API_KEY: process.env.SARVAM_API_KEY,
+            },
+          },
+        } : {}),
+        // Google Workspace: a group with gws.json (impersonateUser) talks to Google
+        // as that mailbox via the service-account GWS MCP. Every other group keeps
+        // the shared-identity gmail + gdrive MCPs exactly as before.
+        ...(gwsEnabled
+          ? {
+              gws: {
+                command: 'node',
+                args: [gwsMcpPath],
+                env: {
+                  GWS_CREDENTIALS_PATH: `/workspace/extra/gws-config/${gwsConfig!.credentialsFile || 'credentials.json'}`,
+                  GWS_IMPERSONATE_USER: gwsConfig!.impersonateUser!,
+                  ...(gwsConfig!.scopes ? { GWS_SCOPES: gwsConfig!.scopes } : {}),
+                },
+              },
+            }
+          : {
+              gmail: {
+                command: 'npx',
+                args: ['-y', '@gongrzhe/server-gmail-autoauth-mcp'],
+              },
+              gdrive: {
+                command: 'npx',
+                args: ['-y', '@modelcontextprotocol/server-gdrive'],
+                env: {
+                  GDRIVE_OAUTH_PATH: '/home/node/.gmail-mcp/gcp-oauth.keys.json',
+                  GDRIVE_CREDENTIALS_PATH: '/home/node/.gmail-mcp/credentials.json',
+                },
+              },
+            }),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -497,6 +626,15 @@ async function runQuery(
     if (message.type === 'system' && message.subtype === 'init') {
       newSessionId = message.session_id;
       log(`Session initialized: ${newSessionId}`);
+    }
+
+    // Hermes pattern: context length guard — warn when approaching limits
+    const msgAny = message as Record<string, unknown>;
+    if (msgAny.usage && typeof msgAny.usage === 'object') {
+      const usage = msgAny.usage as { input_tokens?: number };
+      if (usage.input_tokens && usage.input_tokens > 150000) {
+        log(`⚠️ Context approaching limit: ${usage.input_tokens} tokens`);
+      }
     }
 
     if (message.type === 'system' && (message as { subtype?: string }).subtype === 'task_notification') {
@@ -564,9 +702,11 @@ async function main(): Promise<void> {
 
   // Query loop: run query → wait for IPC message → run new query → repeat
   let resumeAt: string | undefined;
+  let turnCount = 0;
+  const MAX_TURNS_PER_SESSION = parseInt(process.env.MAX_TURNS_PER_SESSION || '20', 10);
   try {
     while (true) {
-      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'})...`);
+      log(`Starting query (session: ${sessionId || 'new'}, resumeAt: ${resumeAt || 'latest'}, turn: ${turnCount + 1}/${MAX_TURNS_PER_SESSION})...`);
 
       const queryResult = await runQuery(prompt, sessionId, mcpServerPath, containerInput, sdkEnv, resumeAt);
       if (queryResult.newSessionId) {
@@ -575,6 +715,7 @@ async function main(): Promise<void> {
       if (queryResult.lastAssistantUuid) {
         resumeAt = queryResult.lastAssistantUuid;
       }
+      turnCount++;
 
       // If _close was consumed during the query, exit immediately.
       // Don't emit a session-update marker (it would reset the host's
@@ -582,6 +723,16 @@ async function main(): Promise<void> {
       if (queryResult.closedDuringQuery) {
         log('Close sentinel consumed during query, exiting');
         break;
+      }
+
+      // Session rotation: reset after MAX_TURNS_PER_SESSION turns to cap token costs.
+      // memory/summary.md (written by the PreCompact hook or periodic saves) provides
+      // continuity — the new session picks it up via the memorySnapshot injection.
+      if (turnCount >= MAX_TURNS_PER_SESSION) {
+        log(`Session rotation at turn ${turnCount} — starting fresh session, memory snapshot will carry context`);
+        sessionId = undefined;
+        resumeAt = undefined;
+        turnCount = 0;
       }
 
       // Emit session update so host can track it
